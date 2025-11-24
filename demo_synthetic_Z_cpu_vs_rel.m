@@ -1,0 +1,301 @@
+clear
+close all
+
+rng('twister')
+
+addpath(genpath('algs'))
+addpath(genpath('utils'))
+
+numRuns = 1;
+
+% Algs setting
+flag_alg = dictionary;
+flag_alg('BiOR-NM3F') = 1;
+flag_alg('MU-ONMF') = 1;
+flag_alg('EM-ONMF') = 1;
+flag_alg('ONPMF') = 1;
+flag_alg('SN-ONMF') = 1;
+flag_alg('NS-ONMF') = 1; % Proposed
+
+algLength = sum(values(flag_alg));
+
+caseNum = 3;
+
+
+for cn = caseNum
+
+    % Data generation
+    m = 300;
+    k = 10;
+    n = 100;
+
+    min_v = 5;
+    points = sort(randi([1, n-k*min_v-1], 1, k-1));
+    parts  = diff([0, points, n-k*min_v]);
+    parts  = parts(randperm(length(parts ))) + min_v;
+    points = [0 cumsum(parts)];
+    C = zeros(n, k);
+    for i = 1:k
+        C(points(i)+1:points(i+1), i) = rand(parts(i), 1);
+    end
+    C = C./vecnorm(C);
+    B = rand(m, k);
+
+    switch cn
+        case 1
+            A = B*C';
+            K = C*C';
+            A_gt = A;
+        case 2
+            ind = randperm(n);
+            C = C(ind, :);
+            A = B*C';
+            K = C*C';
+            A_gt = A;
+        case 3
+            sigma = 1e-8;
+            E = sigma*rand(m, n);
+            A = B*C';
+            K = C*C';
+            A_gt = A;
+            A = A + E;
+    end
+
+    % C-K plot
+    flag_show_C = 1;
+    if flag_show_C
+        subplot(1,2,1)
+        spy(C)
+        subplot(1,2,2)
+        spy(K)
+    end
+
+    % Compute the groundtruth of Z
+    [VV, DD] = eig(C*C');
+    [~, sorted_indices] = sort(diag(DD));
+    Z = VV(:, sorted_indices(1:n-k));
+
+    fprintf('||AZ||_F = %.12f\n', norm(A*Z, 'fro'));
+
+    % Recorder
+    alg_name = cell(algLength, 1);
+    alg_cpu = cell(algLength, 1);
+
+    alg_errC = cell(algLength, 1);
+    alg_orthC = cell(algLength, 1);
+    alg_resC = cell(algLength, 1);
+
+    alg_stepCpu = cell(1, algLength);
+    alg_relError = cell(1, algLength);
+
+    % main runs
+    for t = 1:numRuns
+        alg_cnt = 1;
+        
+        % Algs
+        fprintf('Run #%d for case %d...\n', t, cn);
+
+        if flag_alg('BiOR-NM3F')
+            alg_name{alg_cnt} = 'BiOR-NM3F';
+            fprintf('Processing alg: %12s\n', alg_name{alg_cnt})
+            cpu0 = tic;
+            options = [];
+            options.max_epoch = 10000;
+            options.verbose = 0;
+            options.not_store_infos = true;
+            options.orth_h    = 1;
+            options.norm_h    = 2;
+            options.orth_w    = 0;
+            options.norm_w    = 0;
+            options.Agt = A_gt;
+            [sol, ~, Out_BiOR_NM3F] = dtpp_nmf(A, k, options);
+
+            Cc = sol.H';
+            Bc = sol.W;
+
+            alg_stepCpu{alg_cnt} = [alg_stepCpu{alg_cnt}; Out_BiOR_NM3F.cpu];
+            alg_relError{alg_cnt} = [alg_relError{alg_cnt}; Out_BiOR_NM3F.relError];
+            % --- Record ---
+            alg_cpu{alg_cnt} = [alg_cpu{alg_cnt}; toc(cpu0)];
+            alg_errC{alg_cnt} = [alg_errC{alg_cnt}; norm(Cc*Cc'-C*C', 'fro')];
+            alg_orthC{alg_cnt} = [alg_orthC{alg_cnt}; norm(Cc'*Cc - eye(k), 'fro')];
+            alg_resC{alg_cnt} = [alg_resC{alg_cnt}; norm(A_gt-Bc*Cc', 'fro')/norm(A_gt, 'fro')];
+            alg_cnt  = alg_cnt + 1;
+        end
+
+        if flag_alg('MU-ONMF')
+            alg_name{alg_cnt} = 'MU-ONMF';
+            fprintf('Processing alg: %12s\n', alg_name{alg_cnt})
+            cpu0 = tic;
+            options = [];
+            options.max_epoch = 10000;
+            options.verbose = 0;
+            options.not_store_infos = true;
+            options.orth_h    = 1;
+            options.norm_h    = 2;
+            options.orth_w    = 0;
+            options.norm_w    = 0;
+            options.Agt = A_gt;
+            [sol, ~, Out_MU_ONMF] = orth_mu_nmf(A, k, options);
+
+            Cc = sol.H';
+            Bc = sol.W;
+
+            alg_stepCpu{alg_cnt} = [alg_stepCpu{alg_cnt}; Out_MU_ONMF.cpu];
+            alg_relError{alg_cnt} = [alg_relError{alg_cnt}; Out_MU_ONMF.relError];
+            % --- Record ---
+            alg_cpu{alg_cnt} = [alg_cpu{alg_cnt}; toc(cpu0)];
+            alg_errC{alg_cnt} = [alg_errC{alg_cnt}; norm(Cc*Cc'-C*C', 'fro')];
+            alg_orthC{alg_cnt} = [alg_orthC{alg_cnt}; norm(Cc'*Cc - eye(k), 'fro')];
+            alg_resC{alg_cnt} = [alg_resC{alg_cnt}; norm(A_gt-Bc*Cc', 'fro')/norm(A_gt, 'fro')];
+            alg_cnt  = alg_cnt + 1;
+        end
+
+        if flag_alg('EM-ONMF')
+            alg_name{alg_cnt} = 'EM-ONMF';
+            fprintf('Processing alg: %12s\n', alg_name{alg_cnt})
+            cpu0 = tic;
+
+            numClusters = k;
+            maxEmIters = 100;
+            [clusters,V_emonmf,relError,actualIters,U_binarized,Out_EM_ONMF] = emonmf(A',numClusters,maxEmIters,A_gt');
+            W = V_emonmf';
+            H = (A'*W).*U_binarized;
+            Bc = W.*vecnorm(H);
+            Cc = H./vecnorm(H);
+
+            alg_stepCpu{alg_cnt} = [alg_stepCpu{alg_cnt}; Out_EM_ONMF.cpu];
+            alg_relError{alg_cnt} = [alg_relError{alg_cnt}; Out_EM_ONMF.relError];
+            % --- Record ---
+            alg_cpu{alg_cnt} = [alg_cpu{alg_cnt}; toc(cpu0)];
+            alg_errC{alg_cnt} = [alg_errC{alg_cnt}; norm(Cc*Cc'-C*C', 'fro')];
+            alg_orthC{alg_cnt} = [alg_orthC{alg_cnt}; norm(Cc'*Cc - eye(k), 'fro')];
+            alg_resC{alg_cnt} = [alg_resC{alg_cnt}; norm(A_gt-Bc*Cc', 'fro')/norm(A_gt, 'fro')];
+            alg_cnt  = alg_cnt + 1;
+        end
+
+        if flag_alg('ONPMF') 
+            alg_name{alg_cnt} = 'ONPMF';
+            fprintf('Processing alg: %12s\n', alg_name{alg_cnt})
+            cpu0 = tic;
+
+            numClusters = k;
+            maxOnpmfIters = 3000;
+            maxTimeLimit = 7200;
+            [Uonpmf,V,relError,actualIters,Out_ONPMF] = onpmf(A',numClusters,maxOnpmfIters,A_gt');
+
+            Cc = Uonpmf;
+            Bc = V';
+
+            alg_stepCpu{alg_cnt} = [alg_stepCpu{alg_cnt}; Out_ONPMF.cpu];
+            alg_relError{alg_cnt} = [alg_relError{alg_cnt}; Out_ONPMF.relError];
+            % --- Record ---
+            alg_cpu{alg_cnt} = [alg_cpu{alg_cnt}; toc(cpu0)];
+            alg_errC{alg_cnt} = [alg_errC{alg_cnt}; norm(Cc*Cc'-C*C', 'fro')];
+            alg_orthC{alg_cnt} = [alg_orthC{alg_cnt}; norm(Cc'*Cc - eye(k), 'fro')];
+            alg_resC{alg_cnt} = [alg_resC{alg_cnt}; norm(A_gt-Bc*Cc', 'fro')/norm(A_gt, 'fro')];
+            alg_cnt  = alg_cnt + 1;
+        end
+
+        if flag_alg('SN-ONMF')
+            alg_name{alg_cnt} = 'SN-ONMF';
+            fprintf('Processing alg: %12s\n', alg_name{alg_cnt})
+            cpu0 = tic;
+            opts = [];
+            opts.max_iter = 10000;
+            opts.epsilon = 1e-6;
+            opts.flag_debug = 0;
+            opts.theta = 1e-6;
+            opts.beta = 1e-7;
+            opts.mu1 = 1e-1;
+            opts.mu2 = 1e-1;
+            opts.mu3 = 1e-1;
+            opts.eta = 1.05;
+            opts.r = k;
+            opts.Agt = A_gt;
+            [Kc, Cc, Out_SN_ONMF] = sn_onmf(A', opts);
+            Bc = A*Cc;
+
+            alg_stepCpu{alg_cnt} = [alg_stepCpu{alg_cnt}; Out_SN_ONMF.cpu];
+            alg_relError{alg_cnt} = [alg_relError{alg_cnt}; Out_SN_ONMF.relError];
+             % --- Record ---
+            alg_cpu{alg_cnt} = [alg_cpu{alg_cnt}; toc(cpu0)];
+            alg_errC{alg_cnt} = [alg_errC{alg_cnt}; norm(Cc*Cc'-C*C', 'fro')];
+            alg_orthC{alg_cnt} = [alg_orthC{alg_cnt}; norm(Cc'*Cc - eye(k), 'fro')];
+            alg_resC{alg_cnt} = [alg_resC{alg_cnt}; norm(A_gt-Bc*Cc', 'fro')/norm(A_gt, 'fro')];
+            alg_cnt  = alg_cnt + 1;
+        end
+
+        if flag_alg('NS-ONMF')
+            alg_name{alg_cnt} = 'NS-ONMF';
+            fprintf('Processing alg: %12s\n', alg_name{alg_cnt})
+            cpu0 = tic;
+            opts = [];
+            opts.max_iter = 1000;
+            opts.BCD_MIter = 10;
+            opts.epsilon = 1e-8;
+            opts.flag_debug = 0;
+            opts.r = k;
+            opts.rho = 1e-10;
+            opts.rhomax = 1e8;
+            opts.eta = 0.999;
+            opts.gamma = 1.2;
+            opts.tau = 0.1;
+            opts.Agt = A_gt;
+
+            [Zc, Out_NS_ONMF] = NS_ONMF(A, opts);
+            Cc = Out_NS_ONMF.C;
+            Bc = Out_NS_ONMF.B;
+            
+
+            alg_stepCpu{alg_cnt} = [alg_stepCpu{alg_cnt}; Out_NS_ONMF.cpu];
+            alg_relError{alg_cnt} = [alg_relError{alg_cnt}; Out_NS_ONMF.relError];
+            % --- Record ---
+            alg_cpu{alg_cnt} = [alg_cpu{alg_cnt}; toc(cpu0)];
+            alg_errC{alg_cnt} = [alg_errC{alg_cnt}; norm(Cc*Cc'-C*C', 'fro')];
+            alg_orthC{alg_cnt} = [alg_orthC{alg_cnt}; norm(Cc'*Cc - eye(k), 'fro')];
+            alg_resC{alg_cnt} = [alg_resC{alg_cnt}; norm(A_gt-Bc*Cc', 'fro')/norm(A_gt, 'fro')];
+            alg_cnt  = alg_cnt + 1;
+        end
+
+        flag_plot = 1;
+        flag_plot_save = 1;
+        if flag_plot
+
+            f = figure;
+            fontsize(16,"points")
+            
+            for j = 1:alg_cnt-1
+                semilogy(alg_stepCpu{j}, alg_relError{j}, "LineWidth", 2)
+                hold on
+            end
+            hold off
+            xlabel('CPU(in second)', 'Fontsize', 16, 'Interpreter', 'latex')
+            ylabel('res($\tilde{B},\tilde{C}$)', 'Fontsize', 16, 'Interpreter', 'latex')
+            legend(alg_name, 'Location', 'best')
+            if flag_plot_save
+                set(gcf, 'WindowState', 'maximized');
+                exportgraphics(gca, 'output/cpu_vs_relError.png')
+            end
+        end
+
+    end
+
+    % Table reporting
+    mean_cpu = cellfun(@mean, alg_cpu);
+    mean_errC = cellfun(@mean, alg_errC);
+    mean_orthC = cellfun(@mean, alg_orthC);
+    mean_resC = cellfun(@mean, alg_resC);
+
+
+    flag_report = 1;
+    if flag_report
+        fprintf('%12s\t%8s\t%8s\t%8s\t%8s\n', 'Algs', 'CPU', 'errC', 'orthC', 'resC');
+        for j = 1:alg_cnt-1
+            fprintf('%12s\t%.4f\t%.8e\t%.8e\t%.8e\n', ...
+                alg_name{j}, mean_cpu(j), mean_errC(j), mean_orthC(j), mean_resC(j));
+        end
+    end
+
+    
+end
